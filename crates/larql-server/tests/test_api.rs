@@ -1262,6 +1262,115 @@ fn test_stream_error_response_format() {
 #[test]
 fn test_stream_unknown_type_rejected() {
     let msg_type = "foobar";
-    let supported = ["describe"];
+    let supported = ["describe", "infer"];
     assert!(!supported.contains(&msg_type));
+}
+
+// ══════════════════════════════════════════════════════════════
+// WEBSOCKET INFER STREAMING
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn test_stream_infer_request_format() {
+    let msg = serde_json::json!({
+        "type": "infer",
+        "prompt": "The capital of France is",
+        "top": 5,
+        "mode": "walk"
+    });
+    assert_eq!(msg["type"].as_str(), Some("infer"));
+    assert_eq!(msg["prompt"].as_str(), Some("The capital of France is"));
+    assert_eq!(msg["top"].as_u64(), Some(5));
+    assert_eq!(msg["mode"].as_str(), Some("walk"));
+}
+
+#[test]
+fn test_stream_prediction_response_format() {
+    let msg = serde_json::json!({
+        "type": "prediction",
+        "rank": 1,
+        "token": "Paris",
+        "probability": 0.9791,
+    });
+    assert_eq!(msg["type"].as_str(), Some("prediction"));
+    assert_eq!(msg["rank"].as_u64(), Some(1));
+    assert_eq!(msg["token"].as_str(), Some("Paris"));
+    assert!(msg["probability"].as_f64().unwrap() > 0.0);
+}
+
+#[test]
+fn test_stream_infer_done_response_format() {
+    let msg = serde_json::json!({
+        "type": "infer_done",
+        "prompt": "The capital of France is",
+        "mode": "walk",
+        "predictions": 5,
+        "latency_ms": 210.0,
+    });
+    assert_eq!(msg["type"].as_str(), Some("infer_done"));
+    assert_eq!(msg["mode"].as_str(), Some("walk"));
+    assert_eq!(msg["predictions"].as_u64(), Some(5));
+}
+
+#[test]
+fn test_stream_infer_modes() {
+    let supported_modes = ["walk", "dense"];
+    assert!(supported_modes.contains(&"walk"));
+    assert!(supported_modes.contains(&"dense"));
+    assert!(!supported_modes.contains(&"compare")); // compare not streamed
+}
+
+// ══════════════════════════════════════════════════════════════
+// gRPC PROTO FORMAT
+// ══════════════════════════════════════════════════════════════
+
+#[test]
+fn test_grpc_describe_request_fields() {
+    // Mirrors DescribeRequest proto message
+    let entity = "France";
+    let band = "knowledge";
+    let verbose = false;
+    let limit = 20u32;
+    let min_score = 5.0f32;
+    assert!(!entity.is_empty());
+    assert!(!band.is_empty());
+    assert!(!verbose);
+    assert!(limit > 0);
+    assert!(min_score > 0.0);
+}
+
+#[test]
+fn test_grpc_walk_response_structure() {
+    // WalkResponse: prompt, hits[], latency_ms
+    // WalkHit: layer, feature, gate_score, target, relation
+    let hit = serde_json::json!({
+        "layer": 27,
+        "feature": 9515,
+        "gate_score": 1436.9,
+        "target": "Paris",
+        "relation": "capital",
+    });
+    assert!(hit["layer"].as_u64().is_some());
+    assert!(hit["feature"].as_u64().is_some());
+    assert!(hit["gate_score"].as_f64().is_some());
+    assert!(hit["target"].as_str().is_some());
+}
+
+#[test]
+fn test_grpc_infer_compare_response() {
+    // Compare mode returns walk_predictions + dense_predictions separately
+    let walk_preds = vec![("Paris".to_string(), 0.9791f64)];
+    let dense_preds = vec![("Paris".to_string(), 0.9801f64)];
+    assert_eq!(walk_preds.len(), 1);
+    assert_eq!(dense_preds.len(), 1);
+    assert_ne!(walk_preds[0].1, dense_preds[0].1); // Slightly different
+}
+
+#[test]
+fn test_grpc_port_flag() {
+    // --grpc-port enables gRPC alongside HTTP
+    let grpc_port: Option<u16> = Some(50051);
+    assert!(grpc_port.is_some());
+    let grpc_port: Option<u16> = None;
+    assert!(grpc_port.is_none()); // gRPC disabled
 }

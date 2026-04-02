@@ -775,9 +775,17 @@ Layer-by-layer streaming for DESCRIBE via `WS /v1/stream`:
 
 Edges include probe relation labels when available. Error messages: `{"type": "error", "message": "..."}`.
 
-### 12.2 gRPC (future)
+### 12.2 gRPC (implemented)
 
-For high-throughput scenarios where JSON overhead matters. Protobuf message definitions would mirror the REST API.
+All endpoints available over gRPC via tonic + prost. Enable with `--grpc-port`:
+
+```bash
+larql serve gemma3-4b.vindex --port 8080 --grpc-port 50051
+```
+
+Proto definition: `proto/vindex.proto`. Services mirror the REST API: `Describe`, `Walk`, `Select`, `Infer`, `GetRelations`, `GetStats`, `WalkFfn`, `Health`. Includes `StreamDescribe` for server-streaming layer-by-layer results.
+
+gRPC runs alongside HTTP — both ports active simultaneously. Uses bundled protoc (no system install required).
 
 ### 12.3 Edge Caching (implemented)
 

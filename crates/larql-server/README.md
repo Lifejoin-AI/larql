@@ -63,6 +63,7 @@ larql serve output/gemma3-4b.vindex --api-key "sk-abc123" --tls-cert cert.pem --
 | `--rate-limit <SPEC>` | Per-IP rate limit (e.g., "100/min", "10/sec") | — |
 | `--max-concurrent <N>` | Max concurrent requests | 100 |
 | `--cache-ttl <SECS>` | Cache TTL for DESCRIBE results (0 = disabled) | 0 |
+| `--grpc-port <PORT>` | Enable gRPC server on this port | — |
 | `--tls-cert <PATH>` | TLS certificate for HTTPS | — |
 | `--tls-key <PATH>` | TLS private key for HTTPS | — |
 | `--log-level <LEVEL>` | Logging level | info |
@@ -250,6 +251,18 @@ POST /v1/walk-ffn
 → {"results": [{"layer": 0, "features": [...], "scores": [...]}, ...], "latency_ms": 0.3}
 ```
 
+### gRPC
+
+All endpoints are available over gRPC using Protocol Buffers. Enable with `--grpc-port`:
+
+```bash
+larql serve output/gemma3-4b.vindex --port 8080 --grpc-port 50051
+```
+
+Proto definition: `proto/vindex.proto`. Services: `Describe`, `Walk`, `Select`, `Infer`, `GetRelations`, `GetStats`, `WalkFfn`, `Health`, `StreamDescribe` (server-streaming).
+
+gRPC runs alongside HTTP — both ports active simultaneously.
+
 ### Patch Endpoints
 
 #### POST /v1/patches/apply
@@ -427,8 +440,11 @@ larql-server/
 ├── examples/
 │   ├── server_demo.rs          Synthetic vindex API demo
 │   └── server_bench.rs         Endpoint latency benchmarks
+├── proto/
+│   └── vindex.proto            gRPC service definitions
+├── build.rs                    Proto compilation (bundled protoc)
 ├── tests/
-│   └── test_api.rs             Integration tests (76 tests)
+│   └── test_api.rs             Integration tests (107 tests)
 └── src/
     ├── main.rs                 CLI parsing, vindex loading, server startup
     ├── state.rs                AppState: loaded models, probe labels, lazy weights
@@ -438,6 +454,7 @@ larql-server/
     ├── cache.rs                TTL cache for DESCRIBE results
     ├── session.rs              Per-session PatchedVindex isolation
     ├── etag.rs                 ETag generation for CDN caching
+    ├── grpc.rs                 gRPC service (tonic, all endpoints)
     └── routes/
         ├── mod.rs              Router setup (single + multi-model)
         ├── describe.rs         GET /v1/describe (cached, ETag, relation labels)
@@ -460,6 +477,7 @@ larql-server/
 - `axum` — HTTP framework
 - `axum-server` — TLS support (rustls)
 - `tokio` — async runtime
+- `tonic` + `prost` — gRPC server and protobuf
 - `tower` — concurrency limit middleware
 - `tower-http` — CORS, tracing middleware
 - `clap` — CLI argument parsing

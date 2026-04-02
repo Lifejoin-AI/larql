@@ -48,12 +48,15 @@ async fn handle_socket(mut socket: WebSocket, state: Arc<AppState>) {
             "describe" => {
                 handle_stream_describe(&mut socket, &state, &request).await;
             }
+            "infer" => {
+                handle_stream_infer(&mut socket, &state, &request).await;
+            }
             _ => {
                 let _ = socket
                     .send(Message::Text(
                         serde_json::json!({
                             "type": "error",
-                            "message": format!("unknown message type: {msg_type}. Supported: describe")
+                            "message": format!("unknown message type: {msg_type}. Supported: describe, infer")
                         })
                         .to_string().into(),
                     ))
@@ -206,6 +209,121 @@ async fn handle_stream_describe(
         "type": "done",
         "entity": entity,
         "total_edges": total_edges,
+        "latency_ms": (latency_ms * 10.0).round() / 10.0,
+    });
+    let _ = socket.send(Message::Text(done_msg.to_string().into())).await;
+}
+
+/// Handle streaming INFER: run forward pass and stream top-K predictions.
+///
+/// Protocol:
+///   → {"type": "infer", "prompt": "The capital of France is", "top": 5, "mode": "walk"}
+///   ← {"type": "prediction", "rank": 1, "token": "Paris", "probability": 0.9791}
+///   ← {"type": "prediction", "rank": 2, "token": "the", "probability": 0.0042}
+///   ← {"type": "infer_done", "prompt": "...", "mode": "walk", "latency_ms": 210}
+async fn handle_stream_infer(
+    socket: &mut WebSocket,
+    state: &Arc<AppState>,
+    request: &serde_json::Value,
+) {
+    let prompt = match request["prompt"].as_str() {
+        Some(p) if !p.is_empty() => p.to_string(),
+        _ => {
+            let _ = socket
+                .send(Message::Text(
+                    serde_json::json!({"type": "error", "message": "missing or empty prompt"}).to_string().into(),
+                ))
+                .await;
+            return;
+        }
+    };
+
+    let model = match state.model(None) {
+        Some(m) => Arc::clone(m),
+        None => {
+            let _ = socket
+                .send(Message::Text(
+                    serde_json::json!({"type": "error", "message": "no model loaded"}).to_string().into(),
+                ))
+                .await;
+            return;
+        }
+    };
+
+    if model.infer_disabled {
+        let _ = socket
+            .send(Message::Text(
+                serde_json::json!({"type": "error", "message": "inference disabled (--no-infer)"}).to_string().into(),
+            ))
+            .await;
+        return;
+    }
+
+    let weights = match model.get_or_load_weights() {
+        Ok(w) => w,
+        Err(e) => {
+            let _ = socket
+                .send(Message::Text(
+                    serde_json::json!({"type": "error", "message": e}).to_string().into(),
+                ))
+                .await;
+            return;
+        }
+    };
+
+    let top_k = request["top"].as_u64().unwrap_or(5) as usize;
+    let mode = request["mode"].as_str().unwrap_or("walk");
+
+    let encoding = match model.tokenizer.encode(prompt.as_str(), true) {
+        Ok(e) => e,
+        Err(e) => {
+            let _ = socket
+                .send(Message::Text(
+                    serde_json::json!({"type": "error", "message": e.to_string()}).to_string().into(),
+                ))
+                .await;
+            return;
+        }
+    };
+    let token_ids: Vec<u32> = encoding.get_ids().to_vec();
+    if token_ids.is_empty() {
+        let _ = socket
+            .send(Message::Text(
+                serde_json::json!({"type": "error", "message": "empty prompt after tokenization"}).to_string().into(),
+            ))
+            .await;
+        return;
+    }
+
+    let start = std::time::Instant::now();
+
+    let pred = if mode == "dense" {
+        larql_inference::predict(weights, &model.tokenizer, &token_ids, top_k)
+    } else {
+        let patched = model.patched.blocking_read();
+        let walk_ffn = larql_inference::WalkFfn::new(weights, patched.base(), 8092);
+        larql_inference::predict_with_ffn(weights, &model.tokenizer, &token_ids, top_k, &walk_ffn)
+    };
+
+    // Stream each prediction.
+    for (rank, (token, prob)) in pred.predictions.iter().enumerate() {
+        let msg = serde_json::json!({
+            "type": "prediction",
+            "rank": rank + 1,
+            "token": token,
+            "probability": (*prob * 10000.0).round() / 10000.0,
+        });
+        if socket.send(Message::Text(msg.to_string().into())).await.is_err() {
+            return;
+        }
+    }
+
+    let latency_ms = start.elapsed().as_secs_f64() * 1000.0;
+    let done_msg = serde_json::json!({
+        "type": "infer_done",
+        "prompt": prompt,
+        "mode": mode,
+        "predictions": pred.predictions.len(),
         "latency_ms": (latency_ms * 10.0).round() / 10.0,
     });
     let _ = socket.send(Message::Text(done_msg.to_string().into())).await;
