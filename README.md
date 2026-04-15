@@ -1,6 +1,6 @@
-# LARQL
+# LARQL: A Fork from LifeJoin
 
-The model IS the database. Query neural network weights like a graph database. No GPU required.
+The agent IS the model IS the database. Query neural network weights like a graph database. No GPU required.
 
 LARQL decompiles transformer models into a queryable format called a **vindex** (vector index), then provides **LQL** (Lazarus Query Language) to browse, edit, and recompile the model's knowledge.
 
@@ -54,7 +54,7 @@ larql lql 'USE "hf://chrishayuk/gemma-3-4b-it-vindex"; DESCRIBE "France";'
 
 ## What is a Vindex?
 
-A vindex is a directory containing a model's weights reorganised for queryability. Gate vectors become a KNN index. Embeddings become token lookups. Down projections become edge labels. The model IS the database.
+A vindex is a directory containing a model's weights reorganised for queryability. Gate vectors become a KNN index. Embeddings become token lookups. Down projections become edge labels. The agent IS the model IS the database.
 
 ```
 gemma3-4b.vindex/
